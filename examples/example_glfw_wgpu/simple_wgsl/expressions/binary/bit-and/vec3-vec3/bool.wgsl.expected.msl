@@ -1,0 +1,10 @@
+#include <metal_stdlib>
+using namespace metal;
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  bool3 const a = bool3(true, true, false);
+  bool3 const b = bool3(true, false, true);
+  uint3 const v = uint3(a);
+  bool3 const r = bool3((v & uint3(b)));
+}

@@ -1,0 +1,13 @@
+#include <metal_stdlib>
+using namespace metal;
+
+bool get_bool() {
+  return true;
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  bool2 v2 = bool2(get_bool());
+  bool3 v3 = bool3(get_bool());
+  bool4 v4 = bool4(get_bool());
+}

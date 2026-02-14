@@ -1,0 +1,22 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct tint_module_vars_struct {
+  thread half* t;
+};
+
+half4 m(tint_module_vars_struct tint_module_vars) {
+  (*tint_module_vars.t) = 1.0h;
+  return half4((*tint_module_vars.t));
+}
+
+uint4 tint_v4f16_to_v4u32(half4 value) {
+  return uint4(clamp(value, half4(0.0h), half4(65504.0h)));
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  thread half t = 0.0h;
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.t=(&t)};
+  uint4 v = tint_v4f16_to_v4u32(m(tint_module_vars));
+}

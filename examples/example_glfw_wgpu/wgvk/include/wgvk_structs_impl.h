@@ -2398,12 +2398,19 @@ typedef struct WGPUShaderModuleSingleEntryPoint{
     VkShaderModule module;
 }WGPUShaderModuleSingleEntryPoint;
 
+typedef struct WGPUSpecConstantMapping{
+    char name[64];
+    uint32_t specId;
+}WGPUSpecConstantMapping;
+
 typedef struct WGPUShaderModuleImpl{
     refcount_type refCount;
     WGPUDevice device;
     VkShaderModule vulkanModuleMultiEP;
     WGPUShaderModuleSingleEntryPoint modules[16];
     WGPUChainedStruct* source;
+    WGPUSpecConstantMapping specConstants[32];
+    uint32_t specConstantCount;
 }WGPUShaderModuleImpl;
 
 typedef struct WGPURenderPipelineImpl{

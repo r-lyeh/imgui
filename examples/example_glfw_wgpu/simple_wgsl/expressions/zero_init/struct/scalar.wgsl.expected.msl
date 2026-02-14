@@ -1,0 +1,14 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct S {
+  int i;
+  uint u;
+  float f;
+  bool b;
+};
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  S v = S{};
+}

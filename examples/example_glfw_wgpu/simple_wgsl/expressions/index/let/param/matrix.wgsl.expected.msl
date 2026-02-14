@@ -1,0 +1,12 @@
+#include <metal_stdlib>
+using namespace metal;
+
+float3 f(int i) {
+  float3x3 const m = float3x3(float3(1.0f, 2.0f, 3.0f), float3(4.0f, 5.0f, 6.0f), float3(7.0f, 8.0f, 9.0f));
+  return m[min(uint(i), 2u)];
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void v() {
+  f(1);
+}

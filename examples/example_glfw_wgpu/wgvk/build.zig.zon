@@ -1,0 +1,29 @@
+.{
+    .name = .WGVK,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.1",
+    .paths = .{""},
+    .fingerprint = 0xfa41188e5ce82b6,
+    .dependencies = .{
+        .xcode_frameworks = .{
+            .url = "https://github.com/hexops/xcode-frameworks/archive/8a1cfb373587ea4c9bb1468b7c986462d8d4e10e.zip",
+            .hash = "N-V-__8AALShqgXkvqYU6f__FrA22SMWmi2TXCJjNTO1m8XJ",
+            .lazy = true,
+        },
+        .x11_headers = .{
+            .url = "git+https://github.com/AshishBhattarai/x11-headers#661167b237dabdbb5eb121ec3a01bb8ccbae3151",
+            .hash = "N-V-__8AAH_nQQBttmU7jRZ0CGYKGA917MrX9zX7S5GrxrMA",
+            .lazy = true,
+        },
+        .wayland_headers = .{
+            .url = "git+https://github.com/hexops/wayland-headers#7c53e7483c3cfb5c6780ae542c9f5cfa712a826a",
+            .hash = "N-V-__8AAJfbCQBWPD1WA6AuYSk8LAIj4Bo_KY-2Br8NEIKT",
+            .lazy = true,
+        },
+        .glfw = .{
+            .url = "git+https://github.com/AshishBhattarai/glfw#87d3a3202a2e21909c38384bf31d368277c5f2a2",
+            .hash = "glfw-0.0.0-lD0VFo6rGQDNct-uNtuvjUU0loQ8aYNWtygNdkRc38fT",
+            .lazy = true,
+        },
+    },
+}

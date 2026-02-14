@@ -1,0 +1,10 @@
+#include <metal_stdlib>
+using namespace metal;
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  int v = 3;
+  int2 v2 = int2(v);
+  int3 v3 = int3(v);
+  int4 v4 = int4(v);
+}

@@ -1,0 +1,18 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct tint_module_vars_struct {
+  thread int* t;
+};
+
+int3 m(tint_module_vars_struct tint_module_vars) {
+  (*tint_module_vars.t) = 1;
+  return int3((*tint_module_vars.t));
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  thread int t = 0;
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.t=(&t)};
+  half3 v = half3(m(tint_module_vars));
+}

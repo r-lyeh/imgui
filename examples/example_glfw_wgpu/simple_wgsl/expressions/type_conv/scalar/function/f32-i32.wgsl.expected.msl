@@ -1,0 +1,22 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct tint_module_vars_struct {
+  thread float* t;
+};
+
+float m(tint_module_vars_struct tint_module_vars) {
+  (*tint_module_vars.t) = 1.0f;
+  return float((*tint_module_vars.t));
+}
+
+int tint_f32_to_i32(float value) {
+  return int(clamp(value, -2147483648.0f, 2147483520.0f));
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  thread float t = 0.0f;
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.t=(&t)};
+  int v = tint_f32_to_i32(m(tint_module_vars));
+}

@@ -1,0 +1,13 @@
+#include <metal_stdlib>
+using namespace metal;
+
+uint tint_mod_u32(uint lhs, uint rhs) {
+  return (lhs - ((lhs / select(rhs, 1u, (rhs == 0u))) * select(rhs, 1u, (rhs == 0u))));
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  uint a = 1u;
+  uint b = 0u;
+  uint const r = tint_mod_u32(a, b);
+}

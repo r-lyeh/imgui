@@ -1,0 +1,12 @@
+// flags:  --hlsl-shader-model 62
+enable f16;
+var<private> t : f16;
+fn m() -> vec2<f16> {
+    t = 1.0h;
+    return vec2<f16>(t);
+}
+
+@compute @workgroup_size(1)
+fn f() {
+    var v : vec2<bool> = vec2<bool>(m());
+}

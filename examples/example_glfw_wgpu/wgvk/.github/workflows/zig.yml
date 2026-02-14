@@ -1,0 +1,57 @@
+name: Zig CI (Multiplatform)
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Build Linux
+            target: x86_64-linux-gnu
+          - os: macos-latest
+            name: Build MacOS
+            target: aarch64-macos
+          - os: windows-latest
+            name: Build Windows
+            target: x86_64-windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.15.1
+
+      # TODO: Add tests and examples
+      - name: Build Lib for ${{ matrix.target }}
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast --verbose
+
+      - name: Build Lib for x86_64 windows msvc
+        if: runner.os == 'Windows'
+        run: zig build -Dtarget=x86_64-windows-msvc -Doptimize=ReleaseFast --verbose --prefix ./zig-out/x86_64-windows
+
+      - name: Cross Compile
+        if: runner.os == 'Linux'
+        run: zig build -Doptimize=ReleaseFast all --verbose
+
+      - name: Build Examples Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install -y libwayland-dev libx11-dev libxrandr-dev
+          zig build -Doptimize=ReleaseFast examples --verbose
+
+      - name: Build Examples (non-Linux)
+        if: runner.os != 'Linux'
+        run: zig build -Doptimize=ReleaseFast examples --verbose

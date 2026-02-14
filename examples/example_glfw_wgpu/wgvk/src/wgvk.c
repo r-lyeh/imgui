@@ -1305,9 +1305,6 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
         enabledExtensions[enabledExtensionCount++] = "VK_EXT_direct_mode_display";
         enabledExtensions[enabledExtensionCount++] = "VK_KHR_get_display_properties2";
     #endif
-
-    // enabledExtensions[enabledExtensionCount++] = "VK_LAYER_KHRONOS_validation";
-
     VkInstanceCreateFlags instanceCreateFlags = 0;
     // Handle portability enumeration: Enable it *if* needed and available
     if (needsPortabilityEnumeration) {
@@ -2642,8 +2639,14 @@ WGPUFuture wgpuAdapterRequestDevice(WGPUAdapter adapter, WGPU_NULLABLE WGPUDevic
     userdataforcreatedevice* userdata = RL_CALLOC(1, sizeof(userdataforcreatedevice));
     userdata->adapter = adapter;
     userdata->callbackInfo = callbackInfo;
-    if(options)
-    userdata->deviceDescriptor = *options;
+
+    if(options == NULL){
+        userdata->deviceDescriptor = (WGPUDeviceDescriptor){0};
+    }
+    else{
+        userdata->deviceDescriptor = *options;
+    }
+
     WGPUFutureImpl impl = {
         .userdataForFunction = userdata,
         .functionCalledOnWaitAny = wgpuAdapterCreateDevice_sync,
@@ -3512,6 +3515,30 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
 
             memcpy((void*)copySource->code, source->code, source->codeSize);
             ret->source = (WGPUChainedStruct*)copySource;
+
+            // Extract specialization constant name→SpecId mapping via reflection
+            {
+                SpvReflectShaderModule reflMod;
+                memset(&reflMod, 0, sizeof(reflMod));
+                if (spvReflectCreateShaderModule((size_t)source->codeSize * 4, source->code, &reflMod) == SPV_REFLECT_RESULT_SUCCESS) {
+                    uint32_t scCount = 0;
+                    spvReflectEnumerateSpecializationConstants(&reflMod, &scCount, NULL);
+                    if (scCount > 0) {
+                        SpvReflectSpecializationConstant* scPtrs[32];
+                        uint32_t fetchCount = scCount < 32 ? scCount : 32;
+                        spvReflectEnumerateSpecializationConstants(&reflMod, &fetchCount, scPtrs);
+                        ret->specConstantCount = fetchCount;
+                        for (uint32_t sc = 0; sc < fetchCount; sc++) {
+                            ret->specConstants[sc].specId = scPtrs[sc]->constant_id;
+                            if (scPtrs[sc]->name) {
+                                strncpy(ret->specConstants[sc].name, scPtrs[sc]->name, 63);
+                                ret->specConstants[sc].name[63] = '\0';
+                            }
+                        }
+                    }
+                    spvReflectDestroyShaderModule(&reflMod);
+                }
+            }
             return ret;
         }
         #if SUPPORT_WGSL == 1
@@ -3520,6 +3547,33 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
             size_t length = (source->code.length == WGPU_STRLEN) ? strlen(source->code.data) : source->code.length;
             
             tc_SpirvBlob blob = wgslToSpirv(source, 0, NULL);
+
+            // Extract specialization constant mapping from the first valid SPIR-V blob
+            for(uint32_t i = 0;i < 16;i++){
+                if(blob.entryPoints[i].codeSize){
+                    SpvReflectShaderModule reflMod;
+                    memset(&reflMod, 0, sizeof(reflMod));
+                    if (spvReflectCreateShaderModule(blob.entryPoints[i].codeSize, blob.entryPoints[i].code, &reflMod) == SPV_REFLECT_RESULT_SUCCESS) {
+                        uint32_t scCount = 0;
+                        spvReflectEnumerateSpecializationConstants(&reflMod, &scCount, NULL);
+                        if (scCount > 0) {
+                            SpvReflectSpecializationConstant* scPtrs[32];
+                            uint32_t fetchCount = scCount < 32 ? scCount : 32;
+                            spvReflectEnumerateSpecializationConstants(&reflMod, &fetchCount, scPtrs);
+                            ret->specConstantCount = fetchCount;
+                            for (uint32_t sc = 0; sc < fetchCount; sc++) {
+                                ret->specConstants[sc].specId = scPtrs[sc]->constant_id;
+                                if (scPtrs[sc]->name) {
+                                    strncpy(ret->specConstants[sc].name, scPtrs[sc]->name, 63);
+                                    ret->specConstants[sc].name[63] = '\0';
+                                }
+                            }
+                        }
+                        spvReflectDestroyShaderModule(&reflMod);
+                    }
+                    break; // Only need to reflect once
+                }
+            }
 
             for(uint32_t i = 0;i < 16;i++){
                 if(blob.entryPoints[i].codeSize){
@@ -6138,6 +6192,21 @@ void wgpuQueueRelease                         (WGPUQueue queue){
 
 
 static inline uint32_t std_min_u32_(uint32_t    a, uint32_t    b) {return a < b ? a : b;}
+
+// Look up a WGPUConstantEntry key in the shader module's spec constant mapping
+// Returns the Vulkan specialization constant ID, or falls back to array index
+static uint32_t wgvk_resolve_spec_constant_id(WGPUShaderModule module, const WGPUConstantEntry *entry, uint32_t fallback) {
+    if (!module || !entry->key.data || !entry->key.length) return fallback;
+    for (uint32_t j = 0; j < module->specConstantCount; j++) {
+        size_t nlen = strlen(module->specConstants[j].name);
+        size_t klen = (entry->key.length == WGPU_STRLEN) ? strlen(entry->key.data) : entry->key.length;
+        if (nlen == klen && strncmp(module->specConstants[j].name, entry->key.data, klen) == 0) {
+            return module->specConstants[j].specId;
+        }
+    }
+    return fallback;
+}
+
 WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGPUComputePipelineDescriptor* descriptor){
     ENTRY();
     WGPUComputePipeline ret = RL_CALLOC(1, sizeof(WGPUComputePipelineImpl));
@@ -6162,6 +6231,22 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
             }
         }
     }
+    VkSpecializationInfo computeSpecInfo = {0};
+    float computeConstantBuffer[32];
+    VkSpecializationMapEntry computeMapEntries[32];
+    if(descriptor->compute.constantCount){
+        computeSpecInfo.pData = computeConstantBuffer;
+        for(uint32_t i = 0;i < descriptor->compute.constantCount;i++){
+            computeConstantBuffer[i] = (float)descriptor->compute.constants[i].value;
+            computeMapEntries[i].constantID = wgvk_resolve_spec_constant_id(descriptor->compute.module, &descriptor->compute.constants[i], i);
+            computeMapEntries[i].offset = i * sizeof(float);
+            computeMapEntries[i].size = sizeof(float);
+        }
+        computeSpecInfo.dataSize = descriptor->compute.constantCount * sizeof(float);
+        computeSpecInfo.mapEntryCount = descriptor->compute.constantCount;
+        computeSpecInfo.pMapEntries = computeMapEntries;
+    }
+
     VkPipelineShaderStageCreateInfo computeStage = {
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         NULL,
@@ -6169,7 +6254,7 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
         VK_SHADER_STAGE_COMPUTE_BIT,
         vkModule,
         namebuffer,
-        NULL
+        descriptor->compute.constantCount ? &computeSpecInfo : NULL
     };
 
     const VkComputePipelineCreateInfo cpci = {
@@ -6193,7 +6278,6 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGP
     return ret;
     EXIT();
 }
-
 
 WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPURenderPipelineDescriptor* descriptor) {
     ENTRY();
@@ -6223,30 +6307,28 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
     }
     
     VkSpecializationInfo vertexSpecInfo = {0};
-    double vertexConstantBuffer[32];
+    float vertexConstantBuffer[32];
     VkSpecializationMapEntry vertexMapEntries[32];
     if(descriptor->vertex.constantCount){
         vertexSpecInfo.pData = vertexConstantBuffer;
         for(uint32_t i = 0;i < descriptor->vertex.constantCount;i++){
-            vertexConstantBuffer[i] = descriptor->vertex.constants[i].value;
-            vertexMapEntries[i].constantID = i;
-            vertexMapEntries[i].offset = i * sizeof(double);
-            vertexMapEntries[i].size = 8;
+            vertexConstantBuffer[i] = (float)descriptor->vertex.constants[i].value;
+            vertexMapEntries[i].constantID = wgvk_resolve_spec_constant_id(descriptor->vertex.module, &descriptor->vertex.constants[i], i);
+            vertexMapEntries[i].offset = i * sizeof(float);
+            vertexMapEntries[i].size = sizeof(float);
         }
-        vertexSpecInfo.dataSize = descriptor->vertex.constantCount * sizeof(double);
+        vertexSpecInfo.dataSize = descriptor->vertex.constantCount * sizeof(float);
         vertexSpecInfo.mapEntryCount = descriptor->vertex.constantCount;
         vertexSpecInfo.pMapEntries = vertexMapEntries;
         vertShaderStageInfo.pSpecializationInfo = &vertexSpecInfo;
     }
-    // TODO: Handle constants if necessary via specialization constants
-    // vertShaderStageInfo.pSpecializationInfo = ...;
     shaderStages[shaderStageInsertPos++] = vertShaderStageInfo;
 
     // Fragment Stage (Optional)
     VkPipelineShaderStageCreateInfo fragShaderStageInfo zeroinit;
 
     VkSpecializationInfo fragmentSpecInfo = {0};
-    double fragmentConstantBuffer[32] ;
+    float fragmentConstantBuffer[32];
     VkSpecializationMapEntry fragmentMapEntries[32];
     if (descriptor->fragment) {
         fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -6263,12 +6345,12 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
         if(descriptor->fragment->constantCount){
             fragmentSpecInfo.pData = fragmentConstantBuffer;
             for(uint32_t i = 0;i < descriptor->fragment->constantCount;i++){
-                fragmentConstantBuffer[i] = descriptor->fragment->constants[i].value;
-                fragmentMapEntries[i].constantID = i;
-                fragmentMapEntries[i].offset = i * sizeof(double);
-                fragmentMapEntries[i].size = sizeof(i);
+                fragmentConstantBuffer[i] = (float)descriptor->fragment->constants[i].value;
+                fragmentMapEntries[i].constantID = wgvk_resolve_spec_constant_id(descriptor->fragment->module, &descriptor->fragment->constants[i], i);
+                fragmentMapEntries[i].offset = i * sizeof(float);
+                fragmentMapEntries[i].size = sizeof(float);
             }
-            fragmentSpecInfo.dataSize = descriptor->fragment->constantCount * sizeof(double);
+            fragmentSpecInfo.dataSize = descriptor->fragment->constantCount * sizeof(float);
             fragmentSpecInfo.mapEntryCount = descriptor->fragment->constantCount;
             fragmentSpecInfo.pMapEntries = fragmentMapEntries;
             fragShaderStageInfo.pSpecializationInfo = &fragmentSpecInfo;

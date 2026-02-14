@@ -1,0 +1,50 @@
+; SPIR-V
+; Version: 1.3
+; Generator: Google Tint Compiler; 1
+; Bound: 31
+; Schema: 0
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main"
+               OpExecutionMode %main LocalSize 1 1 1
+               OpName %i "i"
+               OpName %x "x"
+               OpName %vi "vi"
+               OpName %x_0 "x"
+               OpName %main "main"
+        %int = OpTypeInt 32 1
+          %4 = OpTypeFunction %int %int
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+      %v4int = OpTypeVector %int 4
+         %15 = OpTypeFunction %v4int %v4int
+     %v4uint = OpTypeVector %uint 4
+         %21 = OpConstantComposite %v4uint %uint_1 %uint_1 %uint_1 %uint_1
+       %void = OpTypeVoid
+         %25 = OpTypeFunction %void
+      %int_1 = OpConstant %int 1
+         %30 = OpConstantNull %v4int
+          %i = OpFunction %int None %4
+          %x = OpFunctionParameter %int
+          %5 = OpLabel
+          %7 = OpBitcast %uint %x
+          %8 = OpNot %uint %7
+          %9 = OpIAdd %uint %8 %uint_1
+         %11 = OpBitcast %int %9
+               OpReturnValue %11
+               OpFunctionEnd
+         %vi = OpFunction %v4int None %15
+        %x_0 = OpFunctionParameter %v4int
+         %16 = OpLabel
+         %18 = OpBitcast %v4uint %x_0
+         %19 = OpNot %v4uint %18
+         %20 = OpIAdd %v4uint %19 %21
+         %22 = OpBitcast %v4int %20
+               OpReturnValue %22
+               OpFunctionEnd
+       %main = OpFunction %void None %25
+         %26 = OpLabel
+         %27 = OpFunctionCall %int %i %int_1
+         %29 = OpFunctionCall %v4int %vi %30
+               OpReturn
+               OpFunctionEnd

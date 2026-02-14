@@ -1,0 +1,10 @@
+fn f(x : i32) -> vec3<f32> {
+  var m = mat3x3<f32>(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
+  let i = x;
+  return m[i];
+}
+
+@compute @workgroup_size(1)
+fn main() {
+  _ = f(1);
+}

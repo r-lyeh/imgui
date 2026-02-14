@@ -1,0 +1,441 @@
+cmake_minimum_required(VERSION 3.19)
+project(wgvk)
+include(FetchContent)
+
+option(WGVK_BUILD_EXAMPLES "Build some WGVK examples" OFF)
+option(WGVK_BUILD_GLSL_SUPPORT "Build the GLSL->SPIRV compiler (glslang)" OFF)
+set(WGVK_WGSL_SUPPORT "OFF" CACHE STRING "WGSL->SPIRV backend: OFF, TINT, SIMPLE_WGSL")
+set_property(CACHE WGVK_WGSL_SUPPORT PROPERTY STRINGS "OFF" "TINT" "SIMPLE_WGSL")
+if(NOT WGVK_WGSL_SUPPORT STREQUAL "OFF" AND NOT WGVK_WGSL_SUPPORT STREQUAL "TINT" AND NOT WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+  message(FATAL_ERROR "WGVK_WGSL_SUPPORT must be OFF, TINT, or SIMPLE_WGSL (got: ${WGVK_WGSL_SUPPORT})")
+endif()
+option(WGVK_USE_VMA "Use GPUOpen's VMA allocator (Requires C++)" OFF)
+option(WGVK_SUPPORT_DRM "Support Direct Rendering Infrastructure Surfaces (Linux)" OFF)
+if(EMSCRIPTEN)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --use-port=emdawnwebgpu")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --use-port=emdawnwebgpu")
+  set(CMAKE_EXECUTABLE_SUFFIX ".html")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sASYNCIFY=2 -sUSE_GLFW=3")
+endif()
+
+function(wgvk_bundle_libraries output_target)
+  set(options "")
+  set(oneValueArgs TYPE)
+  set(multiValueArgs "")
+  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+  
+  function(get_dependencies input_target)
+  get_target_property(alias ${input_target} ALIASED_TARGET)
+  if(TARGET ${alias})
+    set(input_target ${alias})
+  endif()
+  if(${input_target} IN_LIST all_dependencies)
+    return()
+  endif()
+  list(APPEND all_dependencies ${input_target})
+  get_target_property(link_libraries ${input_target} LINK_LIBRARIES)
+  foreach(dependency IN LISTS link_libraries)
+    if(TARGET ${dependency})
+    get_dependencies(${dependency})
+    endif()
+  endforeach()
+  get_target_property(link_libraries ${input_target} INTERFACE_LINK_LIBRARIES)
+  foreach(dependency IN LISTS link_libraries)
+    if(TARGET ${dependency})
+    get_dependencies(${dependency})
+    endif()
+  endforeach()
+  set(all_dependencies ${all_dependencies} PARENT_SCOPE)
+  endfunction()
+  foreach(input_target IN LISTS ARG_UNPARSED_ARGUMENTS)
+  get_dependencies(${input_target})
+  endforeach()
+  foreach(dependency IN LISTS all_dependencies)
+  get_target_property(type ${dependency} TYPE)
+  if(${type} STREQUAL "STATIC_LIBRARY")
+    list(APPEND all_objects $<TARGET_OBJECTS:${dependency}>)
+  elseif(${type} STREQUAL "OBJECT_LIBRARY")
+    list(APPEND all_objects $<TARGET_OBJECTS:${dependency}>)
+  elseif(${type} STREQUAL "SHARED_LIBRARY")
+    list(APPEND all_objects $<TARGET_OBJECTS:${dependency}>)
+  endif()
+  endforeach()
+  if(ARG_TYPE)
+    add_library(${output_target} ${ARG_TYPE} ${all_objects})
+  else()
+    add_library(${output_target} ${all_objects})
+  endif()
+  add_dependencies(${output_target} ${ARG_UNPARSED_ARGUMENTS})
+endfunction()
+
+# Lock in static for now
+if(EMSCRIPTEN)
+  set(WGVK_CORE_SRC_LIST "src/dummy.c")
+else()
+  set(WGVK_CORE_SRC_LIST "src/wgvk.c")
+  set_source_files_properties("src/wgvk.c" PROPERTIES LANGUAGE C)
+endif()
+if(SANITIZE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=${SANITIZE}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${SANITIZE}")
+endif()
+if(WGVK_USE_VMA)
+  list(APPEND WGVK_CORE_SRC_LIST "src/vma_impl.cpp")
+endif()
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
+
+# We define a variable to hold the name of the main library target.
+# This avoids repeating `if/else` logic for setting properties.
+if(WGVK_BUILD_GLSL_SUPPORT OR NOT WGVK_WGSL_SUPPORT STREQUAL "OFF")
+  set(WGVK_PRIMARY_TARGET_NAME "wgvk_core")
+  add_library(${WGVK_PRIMARY_TARGET_NAME} STATIC ${WGVK_CORE_SRC_LIST})
+else()
+  set(WGVK_PRIMARY_TARGET_NAME "wgvk")
+  add_library(${WGVK_PRIMARY_TARGET_NAME} ${WGVK_CORE_SRC_LIST})
+endif()
+set(BUNDLE_LIST "")
+
+target_compile_features(${WGVK_PRIMARY_TARGET_NAME} PUBLIC c_std_11)
+if(MSVC)
+  target_compile_options(${WGVK_PRIMARY_TARGET_NAME} PUBLIC "/experimental:c11atomics")
+endif()
+set(NONMSVC_WARNINGS "-Wall" "-Wextra" "-Wno-unused-function" "-Wno-unused-parameter" "-Wno-missing-field-initializers")
+target_compile_options(${WGVK_PRIMARY_TARGET_NAME} PRIVATE
+  # MSVC (including clang-cl when using MSVC frontend)
+  $<$<CXX_COMPILER_ID:MSVC>:
+    /W4
+  >
+  # GCC
+  $<$<CXX_COMPILER_ID:GNU>:
+    ${NONMSVC_WARNINGS}
+  >
+  # Clang (Unix-style, not clang-cl)
+  $<$<CXX_COMPILER_ID:Clang>:
+    ${NONMSVC_WARNINGS}
+  >
+  # AppleClang (if you want to distinguish it)
+  $<$<CXX_COMPILER_ID:AppleClang>:
+    ${NONMSVC_WARNINGS}
+  >
+)
+
+
+if(WGVK_WGSL_SUPPORT STREQUAL "TINT")
+
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
+  target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
+  option(DAWN_ENABLE_DESKTOP_GL "" OFF)
+  option(DAWN_ENABLE_OPENGLES "" OFF)
+  option(DAWN_ENABLE_VULKAN "" OFF)
+  option(DAWN_ENABLE_D3D11 "" OFF)
+  option(DAWN_ENABLE_D3D12 "" OFF)
+  option(DAWN_ENABLE_NULL "" OFF)
+  option(DAWN_ENABLE_SPIRV_VALIDATION "" OFF)
+  option(DAWN_BUILD_SAMPLES "" OFF)
+  option(DAWN_BUILD_PROTOBUF "" OFF)
+  option(DAWN_USE_GLFW "" OFF)
+  option(DAWN_USE_X11 "" OFF)
+  option(DAWN_USE_WAYLAND "" OFF)
+  option(TINT_BUILD_GLSL_WRITER "" OFF)
+  option(TINT_BUILD_CMD_TOOLS "" OFF)
+  option(TINT_BUILD_SPV_READER "" OFF)
+  set(TINT_BUILD_SPV_WRITER ON CACHE BOOL "" FORCE)
+  option(TINT_BUILD_WGSL_WRITER "" OFF)
+  option(TINT_BUILD_TESTS "" OFF)
+  option(TINT_BUILD_IR_BINARY "" OFF)
+  option(TINT_BUILD_GLSL_VALIDATOR "" OFF)
+  option(TINT_ENABLE_IR_VALIDATION "" OFF)
+  FetchContent_Declare(
+    dawn
+    URL https://github.com/manuel5975p/dawn_monorepo/archive/refs/tags/v7562.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP True
+  )
+  FetchContent_MakeAvailable(dawn)
+  set(TINT_BUILD_SPV_WRITER ON CACHE BOOL "" FORCE)
+  add_library(tint_c_api STATIC "src/tint_c_api.cpp")
+  target_include_directories(tint_c_api PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+  target_include_directories(tint_c_api PRIVATE "${dawn_SOURCE_DIR}")
+  target_compile_features(tint_c_api PRIVATE cxx_std_20)
+  target_compile_options(tint_c_api PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:Clang>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:AppleClang>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->  # disable RTTI in MSVC
+  )
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
+
+  list(APPEND BUNDLE_LIST ${WGVK_PRIMARY_TARGET_NAME} tint_lang_wgsl_reader tint_lang_spirv_writer tint_lang_wgsl_inspector tint_c_api)
+
+elseif(WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
+  target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
+
+  if(NOT TARGET wgsl_compiler)
+    set(WGSL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SIMPLE_WGSL_LOCAL "${CMAKE_CURRENT_LIST_DIR}/../simple_wgsl")
+    if(EXISTS "${SIMPLE_WGSL_LOCAL}/CMakeLists.txt")
+      add_subdirectory("${SIMPLE_WGSL_LOCAL}" "${CMAKE_CURRENT_BINARY_DIR}/simple_wgsl")
+    else()
+      FetchContent_Declare(
+        simple_wgsl
+        GIT_REPOSITORY https://github.com/manuel5975p/simple_wgsl.git
+        GIT_TAG        master
+        GIT_SHALLOW    True
+      )
+      FetchContent_MakeAvailable(simple_wgsl)
+    endif()
+  endif()
+
+  add_library(simple_wgsl_c_api STATIC "src/simple_wgsl_c_api.c")
+  target_include_directories(simple_wgsl_c_api PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+  target_link_libraries(simple_wgsl_c_api PUBLIC wgsl_compiler)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
+
+  list(APPEND BUNDLE_LIST ${WGVK_PRIMARY_TARGET_NAME} wgsl_compiler simple_wgsl_c_api)
+
+endif()
+
+if(WGVK_BUILD_GLSL_SUPPORT)
+  #find_package(glslang REQUIRED)
+  if(NOT TARGET glslang::glslang)
+    set(ENABLE_OPT OFF)
+    FetchContent_Declare(
+      glslang
+      URL https://github.com/KhronosGroup/glslang/archive/refs/tags/16.0.0.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP True
+    )
+    FetchContent_MakeAvailable(glslang)
+  endif()
+  add_library(glslang_c_api STATIC "${CMAKE_CURRENT_LIST_DIR}/src/glslang_c_api.cpp")
+  if(BUILD_SHARED_LIBS)
+    set_target_properties(glslang_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(WIN32)
+      target_compile_definitions(glslang_c_api PRIVATE GLSLANG_IS_SHARED_LIBRARY=1 GLSLANG_EXPORTING=1 WGVK_EXPORTS=1 WGVK_SHARED_LIBRARY=1)
+    endif()
+  endif()
+  target_link_libraries(glslang_c_api PUBLIC glslang)
+  target_include_directories(glslang_c_api PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+  target_compile_features(glslang_c_api PRIVATE cxx_std_17)
+
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_GLSL=1)
+  list(APPEND BUNDLE_LIST ${WGVK_PRIMARY_TARGET_NAME} glslang glslang_c_api)
+  target_compile_options(glslang_c_api PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:Clang>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:AppleClang>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->  # disable RTTI in MSVC
+  )
+endif()
+
+if(WGVK_BUILD_GLSL_SUPPORT OR NOT WGVK_WGSL_SUPPORT STREQUAL "OFF")
+  if(BUILD_SHARED_LIBS)
+    wgvk_bundle_libraries(wgvk ${WGVK_PRIMARY_TARGET_NAME} TYPE SHARED ${BUNDLE_LIST})
+  else()
+    wgvk_bundle_libraries(wgvk ${WGVK_PRIMARY_TARGET_NAME} ${BUNDLE_LIST})
+  endif()
+  target_link_libraries(wgvk INTERFACE ${WGVK_PRIMARY_TARGET_NAME})
+endif()
+
+if(BUILD_SHARED_LIBS)
+  if(TARGET wgvk_core)
+    set_target_properties(wgvk_core PROPERTIES DEFINE_SYMBOL WGVK_EXPORTS=1)
+    #set_target_properties(wgvk_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  else()
+    set_target_properties(wgvk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    #set_target_properties(wgvk PROPERTIES DEFINE_SYMBOL WGVK_EXPORTS=1)
+  endif()
+
+  if(TARGET wgvk_core)
+    target_compile_definitions(wgvk_core PRIVATE WGVK_SHARED_LIBRARY=1 WGVK_EXPORTS=1)
+  endif()
+  target_compile_definitions(wgvk PRIVATE WGVK_SHARED_LIBRARY=1 WGVK_EXPORTS=1)
+  if(NOT APPLE)
+    target_link_options(wgvk PRIVATE "-static")
+  endif()
+  if(WGVK_WGSL_SUPPORT STREQUAL "TINT")
+    set_target_properties(tint_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  elseif(WGVK_WGSL_SUPPORT STREQUAL "SIMPLE_WGSL")
+    set_target_properties(simple_wgsl_c_api PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  endif()
+endif()
+
+# Now, we apply all remaining properties to the primary target using the variable.
+# Because we used PUBLIC on the primary target and then propagated its interface
+# to the final `wgvk` target, these properties will be correctly inherited.
+if(WGVK_USE_VMA)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC USE_VMA_ALLOCATOR=1)
+endif()
+
+target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+# Platform-specific surface support
+if(WIN32)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WIN32_SURFACE=1)
+elseif(APPLE)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_METAL_SURFACE=1)
+  target_link_libraries(${WGVK_PRIMARY_TARGET_NAME} PUBLIC "-framework Cocoa" "-framework Metal" "-framework QuartzCore")
+elseif(UNIX AND NOT ANDROID)
+  find_package(PkgConfig QUIET)
+  pkg_check_modules(WAYLAND_CLIENT QUIET wayland-client)
+  if(WAYLAND_CLIENT_FOUND)
+    message(STATUS "Wayland found")
+    set(GLFW_BUILD_WAYLAND ON)
+    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WAYLAND_SURFACE=1)
+    target_link_libraries(${WGVK_PRIMARY_TARGET_NAME} PUBLIC wayland-client)
+  endif()
+
+  find_package(X11 QUIET)
+  if(X11_FOUND)
+    set(GLFW_BUILD_X11 ON)
+    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_XLIB_SURFACE=1)
+    target_link_libraries(${WGVK_PRIMARY_TARGET_NAME} PUBLIC X11::X11)
+  endif()
+  if(WGVK_SUPPORT_DRM)
+    pkg_check_modules(LIBDRM REQUIRED libdrm)
+    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC "SUPPORT_DRM_SURFACE=1")
+  endif()
+endif()
+if(ANDROID)
+  target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_ANDROID_SURFACE=1)
+endif()
+
+
+if(WGVK_BUILD_EXAMPLES)
+  if(NOT EMSCRIPTEN)
+    # Disable OpenGL support completely in GLFW
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    set(GLFW_CLIENT_LIBRARY "none" CACHE STRING "" FORCE)
+    # Prevent GLFW headers from including OpenGL headers
+    set(GLFW_INCLUDE_NONE ON CACHE BOOL "" FORCE)
+    
+    FetchContent_Declare(
+      glfw
+      URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP True
+    )
+    FetchContent_MakeAvailable(glfw)
+  endif()
+  add_executable(glfw_surface "examples/glfw_surface.c")
+  if(APPLE)
+    target_compile_options(glfw_surface PRIVATE -x objective-c)
+  endif()
+  add_executable(basic_compute "examples/basic_compute.c")
+  add_executable(asynchronous_loading "examples/asynchronous_loading.c")
+  add_executable(rgfw_surface "examples/rgfw_surface.c")
+  if(NOT APPLE)
+    add_executable(basic_wgsl_shader "examples/basic_wgsl_shader.c")
+    add_executable(basic_glsl_shader "examples/basic_glsl_shader.c")
+  endif()
+  add_executable(multi_submit "examples/multi_submit.c")
+  if(NOT APPLE)
+    add_executable(raytracing "examples/raytracing.c")
+  endif()
+  if(WGVK_SUPPORT_DRM)
+    add_executable(drm_surface "examples/drm_surface.c")
+    target_link_libraries(drm_surface PUBLIC wgvk ${LIBDRM_LIBRARIES})
+    if(NOT MSVC)
+      target_link_libraries(drm_surface PUBLIC m)
+    endif()
+    target_include_directories(drm_surface PRIVATE ${LIBDRM_INCLUDE_DIRS})
+  endif()
+
+  # Examples always link against the final `wgvk` target. Thanks to the fix above,
+  # they will now correctly inherit all necessary compile definitions.
+  target_link_libraries(glfw_surface PUBLIC wgvk glfw)
+  if(NOT APPLE)
+    target_link_libraries(basic_wgsl_shader PUBLIC wgvk glfw)
+    target_link_libraries(basic_glsl_shader PUBLIC wgvk glfw)
+  endif()
+  if(NOT APPLE)
+    target_link_libraries(raytracing PUBLIC wgvk glfw)
+  endif()
+  target_link_libraries(basic_compute PUBLIC wgvk)
+  target_link_libraries(multi_submit PUBLIC wgvk)
+  target_link_libraries(asynchronous_loading PUBLIC wgvk)
+  target_link_libraries(rgfw_surface PUBLIC wgvk)
+
+  if(NOT MSVC AND NOT APPLE)
+    target_link_libraries(basic_wgsl_shader PUBLIC m)
+    target_link_libraries(basic_glsl_shader PUBLIC m)
+    target_link_libraries(multi_submit PUBLIC m)
+  endif()
+
+  if(X11_FOUND)
+    target_link_libraries(rgfw_surface PUBLIC Xrandr)
+  endif()
+endif()
+
+include(CTest)
+enable_testing()
+
+# Add basic_compute as a test
+if(WGVK_BUILD_EXAMPLES)
+  add_test(
+    NAME basic_compute_test
+    COMMAND basic_compute
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  
+  # timeout after 30s to prevent hanging
+  set_tests_properties(basic_compute_test PROPERTIES
+    TIMEOUT 30
+  )
+endif()
+
+# Install targets for release binaries
+install(TARGETS wgvk
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Install headers (excluding vulkan headers)
+install(  
+  FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/wgvk.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/wgvk_config.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/wgvk_structs_impl.h
+  DESTINATION include/
+)
+install(FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/webgpu/webgpu.h
+  DESTINATION include/webgpu
+)
+
+# Create a usage README for releases
+install(CODE "
+  file(WRITE \"${CMAKE_INSTALL_PREFIX}/README.txt\" 
+\"WGVK Release Build
+
+This package contains:
+- lib/libwgvk.a: Static library for linking
+- include/WGVK/: Header files
+
+Basic usage:
+gcc your_program.c -I./include -L./lib -lwgvk -o your_program
+
+For more examples and documentation, visit:
+https://github.com/manuel5975p/WGVK
+\")
+")
+
+if(BUILD_TESTING)
+  set(WGVK_BUILD_GLSL_SUPPORT ON CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP True
+  )
+  FetchContent_MakeAvailable(googletest)
+  enable_testing()
+  add_executable(unit_tests tests/wgvk_unit_tests.cpp)
+  target_compile_features(unit_tests PRIVATE cxx_std_20)
+  target_link_libraries(unit_tests GTest::gtest_main wgvk)
+  include(GoogleTest)
+  gtest_discover_tests(unit_tests)
+endif()

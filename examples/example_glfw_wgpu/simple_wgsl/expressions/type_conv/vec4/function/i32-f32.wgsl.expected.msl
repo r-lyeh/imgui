@@ -1,0 +1,18 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct tint_module_vars_struct {
+  thread int* t;
+};
+
+int4 m(tint_module_vars_struct tint_module_vars) {
+  (*tint_module_vars.t) = 1;
+  return int4((*tint_module_vars.t));
+}
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  thread int t = 0;
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.t=(&t)};
+  float4 v = float4(m(tint_module_vars));
+}

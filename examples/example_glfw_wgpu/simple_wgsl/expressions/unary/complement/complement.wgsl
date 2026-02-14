@@ -1,0 +1,23 @@
+fn i(x : i32) -> i32 {
+  return ~x;
+}
+
+fn u(x : u32) -> u32 {
+  return ~x;
+}
+
+fn vi(x : vec4<i32>) -> vec4<i32> {
+  return ~x;
+}
+
+fn vu(x : vec4<u32>) -> vec4<u32> {
+  return ~x;
+}
+
+@compute @workgroup_size(1)
+fn main() {
+    _ = i(1);
+    _ = u(1);
+    _ = vi(vec4i());
+    _ = vu(vec4u());
+}

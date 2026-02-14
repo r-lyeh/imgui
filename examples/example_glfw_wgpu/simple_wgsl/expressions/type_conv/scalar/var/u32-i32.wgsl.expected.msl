@@ -1,0 +1,13 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct tint_module_vars_struct {
+  thread uint* u;
+};
+
+[[max_total_threads_per_threadgroup(1)]]
+kernel void f() {
+  thread uint u = 1u;
+  tint_module_vars_struct const tint_module_vars = tint_module_vars_struct{.u=(&u)};
+  int const v = int((*tint_module_vars.u));
+}

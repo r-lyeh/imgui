@@ -188,7 +188,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 )";
 
-// nagac -o vert.spv vert.wgsl
+// wgslc -o vert.spv vert.wgsl
 static const unsigned char __shader_vert_spv[] = {
 /*000000*/ 0x03,0x02,0x23,0x07,0x00,0x03,0x01,0x00,0x01,0x00,0x17,0x00,0x5a,0x00,0x00,0x00,
 /*000010*/ 0x00,0x00,0x00,0x00,0x11,0x00,0x02,0x00,0x01,0x00,0x00,0x00,0x0e,0x00,0x03,0x00,
@@ -349,7 +349,7 @@ static const unsigned char __shader_vert_spv[] = {
 /*0009c0*/ 0x00,0x00,0x00,0x00,0xfd,0x00,0x01,0x00,0x38,0x00,0x01,0x00
 };
 
-// nagac -o frag.spv frag.wgsl
+// wgslc -o frag.spv frag.wgsl
 static const unsigned char __shader_frag_spv[] = {
 /*000000*/ 0x03,0x02,0x23,0x07,0x00,0x03,0x01,0x00,0x01,0x00,0x17,0x00,0x3c,0x00,0x00,0x00,
 /*000010*/ 0x00,0x00,0x00,0x00,0x11,0x00,0x02,0x00,0x01,0x00,0x00,0x00,0x0b,0x00,0x06,0x00,
@@ -538,7 +538,7 @@ static WGPUProgrammableStageDescriptor ImGui_ImplWGPU_CreateShaderModule(const T
 {
     ImGui_ImplWGPU_Data* bd = ImGui_ImplWGPU_GetBackendData();
 
-#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
+#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK) && !defined(SUPPORT_WGSL)
     WGPUShaderSourceSPIRV wgsl_desc = {};
     wgsl_desc.chain.sType = WGPUSType_ShaderSourceSPIRV;
     wgsl_desc.code = wgsl_source;
@@ -984,7 +984,7 @@ bool ImGui_ImplWGPU_CreateDeviceObjects()
 
     // Create the vertex shader
     WGPUProgrammableStageDescriptor vertex_shader_desc = ImGui_ImplWGPU_CreateShaderModule(
-#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
+#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK) && !defined(SUPPORT_WGSL)
         (const uint32_t *)__shader_vert_spv, sizeof(__shader_vert_spv)
 #else
         __shader_vert_wgsl
@@ -1018,7 +1018,7 @@ bool ImGui_ImplWGPU_CreateDeviceObjects()
 
     // Create the pixel shader
     WGPUProgrammableStageDescriptor pixel_shader_desc = ImGui_ImplWGPU_CreateShaderModule(
-#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
+#if defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK) && !defined(SUPPORT_WGSL)
         (const uint32_t *)__shader_frag_spv, sizeof(__shader_frag_spv)
 #else
         __shader_frag_wgsl

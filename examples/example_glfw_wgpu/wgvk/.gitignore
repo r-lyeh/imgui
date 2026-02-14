@@ -1,0 +1,12 @@
+build/
+build-*/
+.cache/
+.vscode/
+.zig-cache/
+zig-out/
+
+# Release artifacts
+dist/
+artifacts/
+*.tar.gz
+*.zip

@@ -1,0 +1,190 @@
+# This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just want a single platform.
+# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
+name: CMake on multiple platforms
+
+on:
+  push:
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+
+      # Set up a matrix to run the following configurations:
+      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
+      # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
+      # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
+      # 4. <Windows, Release, MSYS2 MINGW64 GCC compiler>
+      # 5. <Windows, Release, MSYS2 MINGW64 Clang compiler>
+      # 6. <Windows, Release, MSYS2 UCRT64 GCC compiler>
+      # 7. <Windows, Release, MSYS2 UCRT64 Clang compiler>
+      # 8. <Windows, Release, MSYS2 CLANG64 Clang compiler>
+      #
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [Release]
+        c_compiler: [gcc, clang, cl]
+        include:
+          # Windows MSVC
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            build_type: Release
+          # Ubuntu GCC
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            build_type: Release
+          # Ubuntu clang
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+          # macOS Clang
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+          # MSYS2 MINGW64 + GCC
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            build_type: Release
+            msys2_env: MINGW64
+          # MSYS2 MINGW64 + Clang
+          - os: windows-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+            msys2_env: MINGW64
+          # MSYS2 UCRT64 + GCC
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            build_type: Release
+            msys2_env: UCRT64
+          # MSYS2 UCRT64 + Clang
+          - os: windows-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+            msys2_env: UCRT64
+          # MSYS2 CLANG64 + Clang
+          - os: windows-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            build_type: Release
+            msys2_env: CLANG64
+        exclude:
+          - os: windows-latest
+            c_compiler: gcc
+          - os: windows-latest
+            c_compiler: clang
+          - os: ubuntu-latest
+            c_compiler: cl
+          - os: macos-latest
+            c_compiler: gcc
+          - os: macos-latest
+            c_compiler: cl
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev mesa-vulkan-drivers
+
+    - name: Install macOS dependencies
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install molten-vk
+
+    - name: Setup MSYS2 (GCC)
+      if: matrix.msys2_env && matrix.c_compiler == 'gcc'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ matrix.msys2_env }}
+        update: true
+        install: >-
+          base-devel
+          git
+        pacboy: >-
+          toolchain:p
+          cmake:p
+          ninja:p
+          mesa:p
+
+    - name: Setup MSYS2 (Clang)
+      if: matrix.msys2_env && matrix.c_compiler == 'clang'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ matrix.msys2_env }}
+        update: true
+        install: >-
+          base-devel
+          git
+        pacboy: >-
+          clang:p
+          cmake:p
+          ninja:p
+          mesa:p
+
+    - name: Set reusable strings
+      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: Set MSYS2 paths
+      if: matrix.msys2_env
+      id: msys2_strings
+      shell: msys2 {0}
+      run: |
+        echo "build-output-dir=$(cygpath -u '${{ github.workspace }}')/build" >> "$GITHUB_OUTPUT"
+        echo "source-dir=$(cygpath -u '${{ github.workspace }}')" >> "$GITHUB_OUTPUT"
+
+    - name: Configure CMake (MSYS2)
+      if: matrix.msys2_env
+      shell: msys2 {0}
+      run: >
+        cmake -B ${{ steps.msys2_strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DWGVK_USE_VMA=ON
+        -DWGVK_BUILD_GLSL_SUPPORT=ON
+        -DWGVK_BUILD_EXAMPLES=ON
+        -S ${{ steps.msys2_strings.outputs.source-dir }}
+
+    - name: Configure CMake (Regular)
+      if: '!matrix.msys2_env'
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DWGVK_USE_VMA=ON
+        -DWGVK_BUILD_GLSL_SUPPORT=ON
+        -DWGVK_BUILD_EXAMPLES=ON
+        -S ${{ github.workspace }}
+
+    - name: Build (MSYS2)
+      if: matrix.msys2_env
+      shell: msys2 {0}
+      run: cmake --build ${{ steps.msys2_strings.outputs.build-output-dir }} --parallel 4
+
+    - name: Build (Regular)
+      if: '!matrix.msys2_env'
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
+
+    - name: Test (Ubuntu only)
+      if: matrix.os == 'ubuntu-latest'
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      run: ctest --build-config ${{ matrix.build_type }} --verbose

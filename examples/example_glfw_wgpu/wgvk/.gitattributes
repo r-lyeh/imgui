@@ -1,0 +1,4 @@
+*.hpp linguist-detectable=false
+include/vulkan/* linguist-detectable=false
+include/vk_video/* linguist-detectable=false
+include/external/* linguist-detectable=false

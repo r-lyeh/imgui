@@ -327,7 +327,7 @@ static WGPUDevice RequestDevice(wgpu::Instance& instance, wgpu::Adapter& adapter
     IM_ASSERT(acquired_device != nullptr && waitStatusDevice == wgpu::WaitStatus::Success && "Error on Device request");
     return acquired_device.MoveToCHandle();
 }
-#elif defined(IMGUI_IMPL_WEBGPU_BACKEND_WGPU)
+#elif defined(IMGUI_IMPL_WEBGPU_BACKEND_WGPU) || defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
 #ifdef __EMSCRIPTEN__
 // Adapter and device initialization via JS
 EM_ASYNC_JS( void, getAdapterAndDeviceViaJS, (),
@@ -369,23 +369,29 @@ static WGPUAdapter RequestAdapter(WGPUInstance& instance)
 {
     WGPURequestAdapterOptions adapter_options = {};
 
-    WGPUAdapter local_adapter;
+    WGPUAdapter local_adapter = nullptr;
     WGPURequestAdapterCallbackInfo adapterCallbackInfo = {};
+    adapterCallbackInfo.mode = WGPUCallbackMode_WaitAnyOnly;
     adapterCallbackInfo.callback = handle_request_adapter;
     adapterCallbackInfo.userdata1 = &local_adapter;
 
-    wgpuInstanceRequestAdapter(instance, &adapter_options, adapterCallbackInfo);
+    WGPUFuture future = wgpuInstanceRequestAdapter(instance, &adapter_options, adapterCallbackInfo);
+    WGPUFutureWaitInfo waitInfo = { future, false };
+    wgpuInstanceWaitAny(instance, 1, &waitInfo, ~0ull);
     IM_ASSERT(local_adapter && "Error on Adapter request");
     return local_adapter;
 }
 
-static WGPUDevice RequestDevice(WGPUAdapter& adapter)
+static WGPUDevice RequestDevice(WGPUInstance& instance, WGPUAdapter& adapter)
 {
-    WGPUDevice local_device;
+    WGPUDevice local_device = nullptr;
     WGPURequestDeviceCallbackInfo deviceCallbackInfo = {};
+    deviceCallbackInfo.mode = WGPUCallbackMode_WaitAnyOnly;
     deviceCallbackInfo.callback = handle_request_device;
     deviceCallbackInfo.userdata1 = &local_device;
-    wgpuAdapterRequestDevice(adapter, nullptr, deviceCallbackInfo);
+    WGPUFuture future = wgpuAdapterRequestDevice(adapter, nullptr, deviceCallbackInfo);
+    WGPUFutureWaitInfo waitInfo = { future, false };
+    wgpuInstanceWaitAny(instance, 1, &waitInfo, ~0ull);
     IM_ASSERT(local_device && "Error on Device request");
     return local_device;
 }
@@ -433,8 +439,14 @@ static bool InitWGPU(SDL_Window* window)
     preferred_fmt = surface_capabilities.formats[0];
 
     // WGPU backend: Adapter and Device acquisition, Surface creation
-#elif defined(IMGUI_IMPL_WEBGPU_BACKEND_WGPU)
-    wgpu_instance = wgpuCreateInstance(nullptr);
+#elif defined(IMGUI_IMPL_WEBGPU_BACKEND_WGPU) || defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
+
+    WGPUInstanceDescriptor instanceDesc = {};
+    WGPUInstanceFeatureName timedWaitAny = WGPUInstanceFeatureName_TimedWaitAny;
+    instanceDesc.requiredFeatureCount = 1;
+    instanceDesc.requiredFeatures = &timedWaitAny;
+    wgpu_instance = wgpuCreateInstance(&instanceDesc);
+//  wgpu_instance = wgpuCreateInstance(nullptr);
 
 #ifdef __EMSCRIPTEN__
     getAdapterAndDeviceViaJS();
@@ -453,15 +465,18 @@ static bool InitWGPU(SDL_Window* window)
     wgpu_surface = wgpuInstanceCreateSurface(wgpu_instance, &surface_desc);
     preferred_fmt = wgpuSurfaceGetPreferredFormat(wgpu_surface, {} /* adapter */);
 #else // __EMSCRIPTEN__
+
+#if !defined(IMGUI_IMPL_WEBGPU_BACKEND_WGVK)
     wgpuSetLogCallback(
         [](WGPULogLevel level, WGPUStringView msg, void* userdata) { fprintf(stderr, "%s: %.*s\n", ImGui_ImplWGPU_GetLogLevelName(level), (int)msg.length, msg.data); }, nullptr
     );
     wgpuSetLogLevel(WGPULogLevel_Warn);
+#endif
 
     WGPUAdapter adapter = RequestAdapter(wgpu_instance);
     ImGui_ImplWGPU_DebugPrintAdapterInfo(adapter);
     
-    wgpu_device = RequestDevice(adapter);
+    wgpu_device = RequestDevice(wgpu_instance, adapter);
 
     // Create the surface.
     wgpu_surface = CreateWGPUSurface(wgpu_instance, window);

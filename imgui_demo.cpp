@@ -1,4 +1,4 @@
-// dear imgui, v1.92.6 WIP
+// dear imgui, v1.92.7 WIP
 // (demo code)
 
 // Help:
@@ -141,7 +141,7 @@ Index of this file:
 #include <inttypes.h>       // PRId64/PRIu64, not avail in some MinGW headers.
 #endif
 #ifdef __EMSCRIPTEN__
-#include <emscripten/version.h>     // __EMSCRIPTEN_major__ etc.
+#include <emscripten/version.h>     // __EMSCRIPTEN_MAJOR__ etc.
 #endif
 
 // Visual Studio warnings
@@ -289,6 +289,14 @@ extern void*                        GImGuiDemoMarkerCallbackUserData;
 ImGuiDemoMarkerCallback             GImGuiDemoMarkerCallback = NULL;
 void*                               GImGuiDemoMarkerCallbackUserData = NULL;
 #define IMGUI_DEMO_MARKER(section)  do { if (GImGuiDemoMarkerCallback != NULL) GImGuiDemoMarkerCallback("imgui_demo.cpp", __LINE__, section, GImGuiDemoMarkerCallbackUserData); } while (0)
+
+// Sneakily forward declare functions which aren't worth putting in public API yet
+namespace ImGui
+{
+    IMGUI_API void ShowFontAtlas(ImFontAtlas* atlas);
+    IMGUI_API bool TreeNodeGetOpen(ImGuiID storage_id);
+    IMGUI_API void TreeNodeSetOpen(ImGuiID storage_id, bool is_open);
+}
 
 //-----------------------------------------------------------------------------
 // [SECTION] Demo Window / ShowDemoWindow()
@@ -731,7 +739,7 @@ struct ExampleTreeNode
     // Tree structure
     char                        Name[28] = "";
     int                         UID = 0;
-    ExampleTreeNode* Parent = NULL;
+    ExampleTreeNode*            Parent = NULL;
     ImVector<ExampleTreeNode*>  Childs;
     unsigned short              IndexInParent = 0;  // Maintaining this allows us to implement linear traversal more easily
 
@@ -746,7 +754,7 @@ struct ExampleTreeNode
 // (this is a minimal version of what a typical advanced application may provide)
 struct ExampleMemberInfo
 {
-    const char* Name;       // Member name
+    const char*     Name;       // Member name
     ImGuiDataType   DataType;   // Member type
     int             DataCount;  // Member count (1 when scalar)
     int             Offset;     // Offset inside parent structure
@@ -781,7 +789,7 @@ static void ExampleTree_DestroyNode(ExampleTreeNode* node)
 }
 
 // Create example tree data
-// (this allocates _many_ more times than most other code in either Dear ImGui or others demo)
+// (this allocates _many_ more times than most other code in all of Dear ImGui or others demo)
 static ExampleTreeNode* ExampleTree_CreateDemoTree()
 {
     static const char* root_names[] = { "Apple", "Banana", "Cherry", "Kiwi", "Mango", "Orange", "Pear", "Pineapple", "Strawberry", "Watermelon" };
@@ -1745,9 +1753,6 @@ static void DemoWindowWidgetsDragsAndSliders()
 //-----------------------------------------------------------------------------
 // [SECTION] DemoWindowWidgetsFonts()
 //-----------------------------------------------------------------------------
-
-// Forward declare ShowFontAtlas() which isn't worth putting in public API yet
-namespace ImGui { IMGUI_API void ShowFontAtlas(ImFontAtlas* atlas); }
 
 static void DemoWindowWidgetsFonts()
 {
@@ -3079,16 +3084,6 @@ static void DemoWindowWidgetsSelectionAndMultiSelect(ImGuiDemoWindowData* demo_d
                     }
                 }
 
-                static bool TreeNodeGetOpen(ExampleTreeNode* node)
-                {
-                    return ImGui::GetStateStorage()->GetBool((ImGuiID)node->UID);
-                }
-
-                static void TreeNodeSetOpen(ExampleTreeNode* node, bool open)
-                {
-                    ImGui::GetStateStorage()->SetBool((ImGuiID)node->UID, open);
-                }
-
                 // When closing a node: 1) close and unselect all child nodes, 2) select parent if any child was selected.
                 // FIXME: This is currently handled by user logic but I'm hoping to eventually provide tree node
                 // features to do this automatically, e.g. a ImGuiTreeNodeFlags_AutoCloseChildNodes etc.
@@ -3096,11 +3091,11 @@ static void DemoWindowWidgetsSelectionAndMultiSelect(ImGuiDemoWindowData* demo_d
                 {
                     // Recursive close (the test for depth == 0 is because we call this on a node that was just closed!)
                     int unselected_count = selection->Contains((ImGuiID)node->UID) ? 1 : 0;
-                    if (depth == 0 || TreeNodeGetOpen(node))
+                    if (depth == 0 || ImGui::TreeNodeGetOpen((ImGuiID)node->UID))
                     {
                         for (ExampleTreeNode* child : node->Childs)
                             unselected_count += TreeCloseAndUnselectChildNodes(child, selection, depth + 1);
-                        TreeNodeSetOpen(node, false);
+                        ImGui::TreeNodeSetOpen((ImGuiID)node->UID, false);
                     }
 
                     // Select root node if any of its child was selected, otherwise unselect
@@ -3134,7 +3129,7 @@ static void DemoWindowWidgetsSelectionAndMultiSelect(ImGuiDemoWindowData* demo_d
                 {
                     if (node->Parent != NULL) // Root node isn't visible nor selectable in our scheme
                         selection->SetItemSelected((ImGuiID)node->UID, selected);
-                    if (node->Parent == NULL || TreeNodeGetOpen(node))
+                    if (node->Parent == NULL || ImGui::TreeNodeGetOpen((ImGuiID)node->UID))
                         for (ExampleTreeNode* child : node->Childs)
                             TreeSetAllInOpenNodes(child, selection, selected);
                 }
@@ -3154,7 +3149,7 @@ static void DemoWindowWidgetsSelectionAndMultiSelect(ImGuiDemoWindowData* demo_d
                         return NULL;
 
                     // Recurse into childs. Query storage to tell if the node is open.
-                    if (curr_node->Childs.Size > 0 && TreeNodeGetOpen(curr_node))
+                    if (curr_node->Childs.Size > 0 && ImGui::TreeNodeGetOpen((ImGuiID)curr_node->UID))
                         return curr_node->Childs[0];
 
                     // Next sibling, then into our own parent
@@ -8239,7 +8234,11 @@ void ImGui::ShowAboutWindow(bool* p_open)
 #endif
 #ifdef __EMSCRIPTEN__
         ImGui::Text("define: __EMSCRIPTEN__");
+#ifdef __EMSCRIPTEN_MAJOR__
+        ImGui::Text("Emscripten: %d.%d.%d", __EMSCRIPTEN_MAJOR__, __EMSCRIPTEN_MINOR__, __EMSCRIPTEN_TINY__);
+#else
         ImGui::Text("Emscripten: %d.%d.%d", __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__, __EMSCRIPTEN_tiny__);
+#endif
 #endif
 #ifdef NDEBUG
         ImGui::Text("define: NDEBUG");
@@ -8370,6 +8369,11 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
     if (ref == NULL)
         ref = &ref_saved_style;
 
+    // The logic behind dynamically changing 'max_border_size' is to not encourage people to increase border size too much: it'll likely reveal lots of subtle rendering artifacts and this isn't a priority right now.
+    // Note that _MainScale is currently internal PLEASE DO NOT USE IN YOUR CODE.
+    const float default_border_size = (float)(int)style._MainScale;
+    const float max_border_size = IM_MAX(default_border_size, 2.0f);
+
     PushItemWidth(GetWindowWidth() * 0.50f);
 
     {
@@ -8398,11 +8402,11 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
         // Simplified Settings (expose floating-pointer border sizes as boolean representing 0.0f or 1.0f)
         if (SliderFloat("FrameRounding", &style.FrameRounding, 0.0f, 12.0f, "%.0f"))
             style.GrabRounding = style.FrameRounding; // Make GrabRounding always the same value as FrameRounding
-        { bool border = (style.WindowBorderSize > 0.0f); if (Checkbox("WindowBorder", &border)) { style.WindowBorderSize = border ? 1.0f : 0.0f; } }
+        { bool border = (style.WindowBorderSize > 0.0f); if (Checkbox("WindowBorder", &border)) { style.WindowBorderSize = border ? default_border_size : 0.0f; } }
         SameLine();
-        { bool border = (style.FrameBorderSize > 0.0f);  if (Checkbox("FrameBorder", &border)) { style.FrameBorderSize = border ? 1.0f : 0.0f; } }
+        { bool border = (style.FrameBorderSize > 0.0f);  if (Checkbox("FrameBorder", &border)) { style.FrameBorderSize = border ? default_border_size : 0.0f; } }
         SameLine();
-        { bool border = (style.PopupBorderSize > 0.0f);  if (Checkbox("PopupBorder", &border)) { style.PopupBorderSize = border ? 1.0f : 0.0f; } }
+        { bool border = (style.PopupBorderSize > 0.0f);  if (Checkbox("PopupBorder", &border)) { style.PopupBorderSize = border ? default_border_size : 0.0f; } }
     }
 
     // Save/Revert button
@@ -8431,10 +8435,10 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
             SliderFloat("GrabMinSize", &style.GrabMinSize, 1.0f, 20.0f, "%.0f");
 
             SeparatorText("Borders");
-            SliderFloat("WindowBorderSize", &style.WindowBorderSize, 0.0f, 1.0f, "%.0f");
-            SliderFloat("ChildBorderSize", &style.ChildBorderSize, 0.0f, 1.0f, "%.0f");
-            SliderFloat("PopupBorderSize", &style.PopupBorderSize, 0.0f, 1.0f, "%.0f");
-            SliderFloat("FrameBorderSize", &style.FrameBorderSize, 0.0f, 1.0f, "%.0f");
+            SliderFloat("WindowBorderSize", &style.WindowBorderSize, 0.0f, max_border_size, "%.0f");
+            SliderFloat("ChildBorderSize", &style.ChildBorderSize, 0.0f, max_border_size, "%.0f");
+            SliderFloat("PopupBorderSize", &style.PopupBorderSize, 0.0f, max_border_size, "%.0f");
+            SliderFloat("FrameBorderSize", &style.FrameBorderSize, 0.0f, max_border_size, "%.0f");
 
             SeparatorText("Rounding");
             SliderFloat("WindowRounding", &style.WindowRounding, 0.0f, 12.0f, "%.0f");
@@ -8449,9 +8453,9 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
             SliderFloat("ScrollbarPadding", &style.ScrollbarPadding, 0.0f, 10.0f, "%.0f");
 
             SeparatorText("Tabs");
-            SliderFloat("TabBorderSize", &style.TabBorderSize, 0.0f, 1.0f, "%.0f");
-            SliderFloat("TabBarBorderSize", &style.TabBarBorderSize, 0.0f, 2.0f, "%.0f");
-            SliderFloat("TabBarOverlineSize", &style.TabBarOverlineSize, 0.0f, 3.0f, "%.0f");
+            SliderFloat("TabBorderSize", &style.TabBorderSize, 0.0f, max_border_size, "%.0f");
+            SliderFloat("TabBarBorderSize", &style.TabBarBorderSize, 0.0f, max_border_size, "%.0f");
+            SliderFloat("TabBarOverlineSize", &style.TabBarOverlineSize, 0.0f, IM_MAX(3.0f, max_border_size), "%.0f");
             SameLine(); HelpMarker("Overline is only drawn over the selected tab when ImGuiTabBarFlags_DrawSelectedOverline is set.");
             DragFloat("TabMinWidthBase", &style.TabMinWidthBase, 0.5f, 1.0f, 500.0f, "%.0f");
             DragFloat("TabMinWidthShrink", &style.TabMinWidthShrink, 0.5f, 1.0f, 500.0f, "%0.f");
@@ -8476,7 +8480,7 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
                         style.TreeLinesFlags = option;
                 EndCombo();
             }
-            SliderFloat("TreeLinesSize", &style.TreeLinesSize, 0.0f, 2.0f, "%.0f");
+            SliderFloat("TreeLinesSize", &style.TreeLinesSize, 0.0f, max_border_size, "%.0f");
             SliderFloat("TreeLinesRounding", &style.TreeLinesRounding, 0.0f, 12.0f, "%.0f");
 
             SeparatorText("Windows");
@@ -8498,7 +8502,7 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
             SliderFloat2("SeparatorTextPadding", (float*)&style.SeparatorTextPadding, 0.0f, 40.0f, "%.0f");
             SliderFloat("LogSliderDeadzone", &style.LogSliderDeadzone, 0.0f, 12.0f, "%.0f");
             SliderFloat("ImageRounding", &style.ImageRounding, 0.0f, 12.0f, "%.0f");
-            SliderFloat("ImageBorderSize", &style.ImageBorderSize, 0.0f, 1.0f, "%.0f");
+            SliderFloat("ImageBorderSize", &style.ImageBorderSize, 0.0f, max_border_size, "%.0f");
 
             SeparatorText("Tooltips");
             for (int n = 0; n < 2; n++)
@@ -9444,7 +9448,7 @@ static void ShowExampleAppLayout(bool* p_open)
 struct ExampleAppPropertyEditor
 {
     ImGuiTextFilter     Filter;
-    ExampleTreeNode*    VisibleNode = NULL;
+    ExampleTreeNode*    SelectedNode = NULL;
 
     void Draw(ExampleTreeNode* root_node)
     {
@@ -9459,7 +9463,7 @@ struct ExampleAppPropertyEditor
                 Filter.Build();
             ImGui::PopItemFlag();
 
-            if (ImGui::BeginTable("##bg", 1, ImGuiTableFlags_RowBg))
+            if (ImGui::BeginTable("##list", 1, ImGuiTableFlags_RowBg))
             {
                 for (ExampleTreeNode* node : root_node->Childs)
                     if (Filter.PassFilter(node->Name)) // Filter root node
@@ -9473,7 +9477,7 @@ struct ExampleAppPropertyEditor
         ImGui::SameLine();
 
         ImGui::BeginGroup(); // Lock X position
-        if (ExampleTreeNode* node = VisibleNode)
+        if (ExampleTreeNode* node = SelectedNode)
         {
             ImGui::Text("%s", node->Name);
             ImGui::TextDisabled("UID: 0x%08X", node->UID);
@@ -9546,7 +9550,7 @@ struct ExampleAppPropertyEditor
         tree_flags |= ImGuiTreeNodeFlags_NavLeftJumpsToParent;  // Left arrow support
         tree_flags |= ImGuiTreeNodeFlags_SpanFullWidth;         // Span full width for easier mouse reach
         tree_flags |= ImGuiTreeNodeFlags_DrawLinesToNodes;      // Always draw hierarchy outlines
-        if (node == VisibleNode)
+        if (node == SelectedNode)
             tree_flags |= ImGuiTreeNodeFlags_Selected;
         if (node->Childs.Size == 0)
             tree_flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
@@ -9556,7 +9560,7 @@ struct ExampleAppPropertyEditor
         if (node->DataMyBool == false)
             ImGui::PopStyleColor();
         if (ImGui::IsItemFocused())
-            VisibleNode = node;
+            SelectedNode = node;
         if (node_open)
         {
             for (ExampleTreeNode* child : node->Childs)
